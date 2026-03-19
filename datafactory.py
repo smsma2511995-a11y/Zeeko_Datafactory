@@ -1,10 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-"""
-مصنع البيانات الذكي لـ "زيكو" – إصدار يعتمد على Gemini API (google-genai) فقط
-لتوليد بيانات عربية دقيقة وخالية من الأخطاء الإملائية (خاصة التمييز بين الياء والتنوين).
-"""
 import os
 import json
 import logging
@@ -16,64 +12,70 @@ import sys
 from tqdm import tqdm
 from datasets import load_dataset
 
-# 1. تأمين الاستيراد بالطريقة الصحيحة للمكتبة الجديدة
+# 1. إعداد اللوجر فوراً لتجنب NameError
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+# 2. تأمين استيراد المكتبات (النسخة المتوافقة مع GitHub Actions)
 try:
     from google import genai
     from google.genai import types
     GENAI_AVAILABLE = True
-    print("✅ تم العثور على مكتبة Gemini بنجاح")
+    logger.info("✅ تم التحقق من وجود مكتبة google-genai")
 except ImportError:
-    print("🔄 المكتبة مش مقروءة.. جاري محاولة الربط المباشر...")
-    try:
-        # محاولة إجبار بايثون على رؤية المكتبات المثبتة
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "google-genai", "json5", "pyyaml"])
-        from google import genai
-        from google.genai import types
-        GENAI_AVAILABLE = True
-    except:
-        GENAI_AVAILABLE = False
-        print("❌ فشل نهائي في العثور على google-genai")
-        exit(1)
+    logger.info("🔄 المكتبة مفقودة، جاري التثبيت...")
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "google-genai", "json5", "pyyaml"])
+    from google import genai
+    from google.genai import types
+    GENAI_AVAILABLE = True
 
-# 2. تأمين json5
+# محاولة استيراد json5 لإصلاح الـ JSON المكسور
 try:
     import json5
     JSON5_AVAILABLE = True
 except ImportError:
     JSON5_AVAILABLE = False
 
-# -------------------- الإعدادات --------------------
-with open("config.yaml", "r") as f:
-    config = yaml.safe_load(f)
+# 3. إعدادات النموذج والحرارة (المعاملات التقنية)
+GEMINI_MODEL = "gemini-2.5-flash-lite"  # النموذج المعتمد
+TEMPERATURE = 0.3                  # لضمان إجابات دقيقة وغير عشوائية
+MAX_NEW_TOKENS_DEFAULT = 2048      # طول الإجابة الافتراضي
+GEMINI_DELAY = 10.0                 # تأخير بين الطلبات لتجنب الـ Rate Limit
 
-gemini_cfg = config.get("gemini", {})
+# 4. تحميل الإعدادات من config.yaml
+try:
+    if not os.path.exists("config.yaml"):
+        with open("config.yaml", "w", encoding="utf-8") as f:
+            default_config = {
+                "gemini": {"api_keys": []},
+                "data": {"max_samples": 100}
+            }
+            yaml.dump(default_config, f)
+    
+    with open("config.yaml", "r", encoding="utf-8") as f:
+        config = yaml.safe_load(f)
+except Exception as e:
+    logger.error(f"❌ فشل في تحميل config.yaml: {e}")
+    config = {"data": {"max_samples": 100}}
 
-# إعدادات المعالجة
-TEMPERATURE = 0.3
-MAX_NEW_TOKENS_DEFAULT = 512
-MAX_NEW_TOKENS_CODING = 2048   # للمهام البرمجية (إذا أردنا استخدام Gemini لها)
-GEMINI_DELAY = 10               # تأخير بين الطلبات لتجنب حدود المعدل
-RETRY_ATTEMPTS = 3
-RETRY_DELAY = 5
+# 5. تهيئة عميل Gemini
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
-# ملفات الإخراج
-OUTPUT_FILE = "data/enriched_training_data.jsonl"
-FAILED_OUTPUT_FILE = "data/failed_samples.jsonl"
-os.makedirs("data", exist_ok=True)
+if GENAI_AVAILABLE and GEMINI_API_KEY:
+    try:
+        # تهيئة العميل بالمكتبة الجديدة
+        client = genai.Client(api_key=GEMINI_API_KEY)
+        logger.info(f"🚀 تم تشغيل المصنع بنجاح: {GEMINI_MODEL}")
+        logger.info(f"⚙️ الإعدادات: Temp={TEMPERATURE}, Delay={GEMINI_DELAY}s")
+    except Exception as e:
+        logger.error(f"❌ خطأ في تهيئة العميل: {e}")
+else:
+    logger.error("⚠️ تحذير: GEMINI_API_KEY غير موجود في الـ Environment Variables")
 
-# -------------------- إعداد Gemini (باستخدام google.genai.Client) --------------------
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or gemini_cfg.get("api_key")
-if not GEMINI_API_KEY:
-    logger.error("❌ لم يتم العثور على مفتاح Gemini. الرجاء تعيين GEMINI_API_KEY في البيئة أو config.yaml")
-    exit(1)
 
-# إنشاء العميل
-client = genai.Client(
-    api_key=GEMINI_API_KEY,
-    http_options={'api_version': 'v1'}  # مهم لاستقرار الاتصال
-)
-GEMINI_MODEL = gemini_cfg.get("model", "gemini-2.0-flash-lite")  # أو أي نموذج تريده
-logger.info(f"✅ تم تهيئة Gemini باستخدام الموديل {GEMINI_MODEL}")
 
 # -------------------- دوال مساعدة --------------------
 def extract_json(text):
