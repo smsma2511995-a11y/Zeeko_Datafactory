@@ -1,0 +1,57 @@
+# =========================================================
+# Integrated SLM + RAG Configuration
+# =========================================================
+
+tokenizer:
+  model_path: "tokenizer.model"
+  vocab_size: 32000
+
+model:
+  d_model: 384
+  num_heads: 12
+  num_layers: 8
+  ff_dim: 1024
+  max_seq_len: 2048
+  # معامل خاص لدمج سياق الـ RAG
+  rag_injection_type: "text_prepend" # وضع النصوص المسترجعة في بداية الـ Prompt
+
+rag:
+  model_name: "sentence-transformers/LaBSE" # المستخدم في rag_memory.py
+  embedding_dim: 768                          # أبعاد LaBSE الثابتة
+  index_path: "faiss_index.bin"               #
+  texts_path: "retrieved_texts.json"           #
+  top_k: 5
+  similarity_metric: "inner_product"          # مطابق لـ IndexFlatIP
+
+vision:
+  encoder_backbone: "mobilenet_v3_small"
+  image_size: [320, 320]
+
+training:
+  batch_size: 2
+  gradient_accumulation_steps: 8 
+  epochs: 20
+  lr: 0.00005
+  use_amp: true
+  
+teacher:
+  mode: "local"
+  local:
+    code_analyzer: "deepseek-ai/deepseek-coder-1.3b-instruct"
+    arabic_generator: "Qwen2.5-7B-Instruct"
+  quantization:
+    load_in_4bit: true
+
+gemini:
+  api_key: ${{ secrets.GEMINI_API_KEY }}
+  model: "gemini-2.0-flash-lite"
+
+data:
+  synthetic_json: "synthetic_data.json"
+                            # للاختبار (يُرفع لاحقاً)
+  do_sample : False
+  max_new_tokens : 2048
+
+export:
+  onnx_path: "model.onnx"
+  tflite_path: "model_quant.tflite"
