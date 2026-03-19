@@ -36,14 +36,16 @@ jobs:
         key: datafactory-output-${{ github.run_id }}
         restore-keys: |
           datafactory-output-
-
     - name: Run data factory
       env:
         GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         HF_API_KEY: ${{ secrets.HF_API_KEY }}
       run: |
-        # التأكد من وجود ملف الإعدادات وإذا لم يوجد يتم تجاهل الخطأ أو إنشاؤه
-        python datafactory.py
+        # تثبيت المكتبات والتأكد من وجودها في نفس الجلسة
+        python -m pip install --upgrade pip
+        pip install huggingface_hub google-genai datasets tqdm pyyaml json5
+        
+
 
     # رفع النتائج كـ Artifact عشان تحملها وتطمن على "زيكو"
     - name: Upload output files
