@@ -14,6 +14,28 @@ import re
 import yaml
 from tqdm import tqdm
 from datasets import load_dataset
+import os
+import subprocess
+import sys
+
+# دالة إجبارية لتثبيت المكتبات من داخل السكربت
+def install_and_import(package):
+    try:
+        __import__(package.replace('-', '_'))
+    except ImportError:
+        print(f"🔄 محاولة تثبيت {package} إجبارياً...")
+        subprocess.check_call([sys.executable, "-m", "pip", "install", package])
+
+# تأمين وجود المكتبات قبل أي حاجة
+install_and_import('google-genai')
+install_and_import('json5')
+install_and_import('pyyaml')
+
+# الآن الاستيراد العادي
+from google import genai
+from google.genai import types
+import json5
+import yaml
 
 # استيراد Gemini API (المكتبة الجديدة google-genai)
 try:
