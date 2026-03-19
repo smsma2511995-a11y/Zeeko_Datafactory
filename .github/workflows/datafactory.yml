@@ -1,14 +1,14 @@
 name: Run Data Factory (Long-running)
 
 on:
-  workflow_dispatch:         # تشغيل يدوي من واجهة GitHub
+  workflow_dispatch:
   schedule:
-    - cron: '0 2 * * *'      # تشغيل تلقائي يومياً الساعة 2 صباحاً
+    - cron: '0 2 * * *'
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 360      # مسموح له يشتغل حتى 6 ساعات
+    timeout-minutes: 360
 
     steps:
     - name: Checkout repository
@@ -19,39 +19,31 @@ jobs:
       with:
         python-version: '3.10'
 
-    # دمجنا التثبيت والتشغيل لضمان التعرف على المكتبات
     - name: Run data factory
       env:
         GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         HF_API_KEY: ${{ secrets.HF_API_KEY }}
       run: |
-        # 1. تحديث pip وتثبيت المكتبات المطلوبة فوراً
+        # 1. التثبيت باستخدام python -m لضمان المسار الصحيح
         python -m pip install --upgrade pip
-        pip install huggingface_hub google-genai datasets tqdm pyyaml json5
+        python -m pip install huggingface_hub google-genai datasets tqdm pyyaml json5
         
-        # 2. التأكد من وجود ملف config.yaml (لو مش موجود بنعمل واحد افتراضي)
-        # ده بيمنع خطأ FileNotFoundError في بداية السكربت
-        if [ ! -f config.yaml ]; then
-          echo "إنشاء ملف إعدادات افتراضي..."
-          echo "gemini:" > config.yaml
-          echo "  api_keys: []" >> config.yaml
-          echo "data:" >> config.yaml
-          echo "  max_samples: 100" >> config.yaml
-        fi
+        # 2. إنشاء ملف config.yaml بتنسيق سليم جداً يوافق كود الـ Python بتاعك
+        cat <<EOF > config.yaml
+        gemini:
+          api_keys: []
+        data:
+          max_samples: 100
+        EOF
 
-        # 3. استعادة الملفات السابقة يدوياً لو كانت موجودة (اختياري)
-        # (خطوة الـ Cache بتعمل ده تلقائياً بس إحنا بنأمن التشغيل هنا)
+        # 3. تشغيل السكربت مع طباعة الأخطاء لو حصلت
+        python datafactory.py || { echo "❌ السكربت فشل.. دي آخر سطور قبل الوقوع:"; exit 1; }
 
-        # 4. تشغيل السكربت الرئيسي
-        python datafactory.py
-
-    # حفظ النتائج حتى لو حصل فشل عشان مجهودك وضياع النت
     - name: Upload output files as Artifacts
       if: always()
       uses: actions/upload-artifact@v4
       with:
         name: datafactory-results
         path: |
-          enriched_training_data.jsonl
-          failed_samples.jsonl
-          pending_grammar_items.json
+          *.jsonl
+          *.json
