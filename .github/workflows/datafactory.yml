@@ -1,14 +1,14 @@
 name: Run Data Factory (Long-running)
 
 on:
-  workflow_dispatch:
+  workflow_dispatch:         # تشغيل يدوي
   schedule:
-    - cron: '0 2 * * *'
+    - cron: '0 2 * * *'      # تشغيل تلقائي يومياً
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 360
+    timeout-minutes: 360      # متاح لحد 6 ساعات
 
     steps:
     - name: Checkout repository
@@ -21,14 +21,17 @@ jobs:
 
     - name: Install dependencies
       run: |
+        python -m pip install --upgrade pip
         pip install huggingface_hub google-genai datasets tqdm pyyaml json5
 
+    # استعادة الملفات لضمان عدم تكرار العينات (Resume)
     - name: Restore previous output files
       id: cache-output
       uses: actions/cache@v4
       with:
         path: |
-          data/
+          enriched_training_data.jsonl
+          failed_samples.jsonl
           pending_grammar_items.json
         key: datafactory-output-${{ github.run_id }}
         restore-keys: |
@@ -39,14 +42,27 @@ jobs:
         GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         HF_API_KEY: ${{ secrets.HF_API_KEY }}
       run: |
+        # التأكد من وجود ملف الإعدادات وإذا لم يوجد يتم تجاهل الخطأ أو إنشاؤه
         python datafactory.py
 
-    - name: Upload output files as artifacts
+    # رفع النتائج كـ Artifact عشان تحملها وتطمن على "زيكو"
+    - name: Upload output files
       if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: enriched-data
+        name: datafactory-results
         path: |
-          data/
+          enriched_training_data.jsonl
+          failed_samples.jsonl
           pending_grammar_items.json
-        retention-days: 30
+
+    # حفظ الملفات في الكاش للمرة القادمة
+    - name: Save output to cache
+      if: always()
+      uses: actions/cache/save@v4
+      with:
+        path: |
+          enriched_training_data.jsonl
+          failed_samples.jsonl
+          pending_grammar_items.json
+        key: datafactory-output-${{ github.run_id }}
