@@ -5,59 +5,42 @@
 مصنع البيانات الذكي لـ "زيكو" – إصدار يعتمد على Gemini API (google-genai) فقط
 لتوليد بيانات عربية دقيقة وخالية من الأخطاء الإملائية (خاصة التمييز بين الياء والتنوين).
 """
-
 import os
 import json
 import logging
 import time
 import re
 import yaml
-from tqdm import tqdm
-from datasets import load_dataset
-import os
 import subprocess
 import sys
+from tqdm import tqdm
+from datasets import load_dataset
 
-# دالة إجبارية لتثبيت المكتبات من داخل السكربت
-def install_and_import(package):
-    try:
-        __import__(package.replace('-', '_'))
-    except ImportError:
-        print(f"🔄 محاولة تثبيت {package} إجبارياً...")
-        subprocess.check_call([sys.executable, "-m", "pip", "install", package])
-
-# تأمين وجود المكتبات قبل أي حاجة
-install_and_import('google-genai')
-install_and_import('json5')
-install_and_import('pyyaml')
-
-# الآن الاستيراد العادي
-from google import genai
-from google.genai import types
-import json5
-import yaml
-
-# استيراد Gemini API (المكتبة الجديدة google-genai)
+# 1. تأمين الاستيراد بالطريقة الصحيحة للمكتبة الجديدة
 try:
     from google import genai
     from google.genai import types
-    from google.api_core import exceptions
     GENAI_AVAILABLE = True
+    print("✅ تم العثور على مكتبة Gemini بنجاح")
 except ImportError:
-    GENAI_AVAILABLE = False
-    logging.error("❌ google-genai غير مثبت. الرجاء تثبيته: pip install google-genai")
-    exit(1)
+    print("🔄 المكتبة مش مقروءة.. جاري محاولة الربط المباشر...")
+    try:
+        # محاولة إجبار بايثون على رؤية المكتبات المثبتة
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "google-genai", "json5", "pyyaml"])
+        from google import genai
+        from google.genai import types
+        GENAI_AVAILABLE = True
+    except:
+        GENAI_AVAILABLE = False
+        print("❌ فشل نهائي في العثور على google-genai")
+        exit(1)
 
-# محاولة استيراد json5 للمساعدة في تحليل JSON
+# 2. تأمين json5
 try:
     import json5
     JSON5_AVAILABLE = True
 except ImportError:
     JSON5_AVAILABLE = False
-    logging.warning("⚠️ json5 غير مثبت. سيتم استخدام json العادي مع محاولات إصلاح يدوية.")
-
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
 # -------------------- الإعدادات --------------------
 with open("config.yaml", "r") as f:
