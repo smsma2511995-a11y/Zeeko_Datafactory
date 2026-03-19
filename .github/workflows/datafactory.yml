@@ -1,14 +1,14 @@
 name: Run Data Factory (Long-running)
 
 on:
-  workflow_dispatch:         # يسمح بتشغيله يدوياً من واجهة GitHub
+  workflow_dispatch:
   schedule:
-    - cron: '0 2 * * *'      # تشغيل يومي في الساعة 2 صباحاً (يمكنك تعديل التوقيت)
+    - cron: '0 2 * * *'
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 360      # الحد الأقصى 6 ساعات (يمكن زيادته حتى 360 دقيقة)
+    timeout-minutes: 360
 
     steps:
     - name: Checkout repository
@@ -23,14 +23,12 @@ jobs:
       run: |
         pip install huggingface_hub google-genai datasets tqdm pyyaml json5
 
-    # استعادة الملفات السابقة (إن وجدت) لاستئناف المعالجة
     - name: Restore previous output files
       id: cache-output
       uses: actions/cache@v4
       with:
         path: |
-          /data/enriched_training_data.jsonl
-          /data/failed_samples.jsonl
+          data/
           pending_grammar_items.json
         key: datafactory-output-${{ github.run_id }}
         restore-keys: |
@@ -43,13 +41,12 @@ jobs:
       run: |
         python datafactory.py
 
-    # رفع المخرجات بعد الانتهاء (أو حتى لو فشل العمل)
     - name: Upload output files as artifacts
+      if: always()
       uses: actions/upload-artifact@v4
       with:
         name: enriched-data
         path: |
-          /data/enriched_training_data.jsonl
-          /data/failed_samples.jsonl
+          data/
           pending_grammar_items.json
-        retention-days: 30      # يحتفظ بالمخرجات لمدة 7 أيام
+        retention-days: 30
