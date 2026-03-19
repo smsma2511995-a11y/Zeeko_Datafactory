@@ -17,7 +17,7 @@ from datasets import load_dataset
 
 # استيراد Gemini API
 try:
-    from google import genai
+    from google.genai import genai
     from google.genai import types
     from google.api_core import exceptions
     GENAI_AVAILABLE = True
