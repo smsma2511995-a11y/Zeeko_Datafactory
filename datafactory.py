@@ -40,10 +40,19 @@ except ImportError:
     JSON5_AVAILABLE = False
 
 # 3. إعدادات النموذج والحرارة (المعاملات التقنية)
-GEMINI_MODEL = "gemini-2.5-flash-lite"  # النموذج المعتمد
-TEMPERATURE = 0.3                  # لضمان إجابات دقيقة وغير عشوائية
-MAX_NEW_TOKENS_DEFAULT = 2048      # طول الإجابة الافتراضي
-GEMINI_DELAY = 10.0                 # تأخير بين الطلبات لتجنب الـ Rate Limit
+# 3. إعدادات النموذج والمسارات (أضف السطور التالية)
+GEMINI_MODEL = "gemini-1.5-flash"  # النموذج المتاح والمستقر حالياً
+TEMPERATURE = 0.3
+MAX_NEW_TOKENS_DEFAULT = 2048
+GEMINI_DELAY = 5.0                 # تقليل التأخير قليلاً لتسريع العمل (2 ثانية كافية)
+RETRY_ATTEMPTS = 3                 # عدد محاولات إعادة المحاولة عند الفشل
+RETRY_DELAY = 5                    # وقت الانتظار بين المحاولات
+
+# تعريف مسارات الملفات (دي اللي كانت ناقصة ومسببة الـ Error)
+OUTPUT_FILE = "enriched_training_data.jsonl"
+FAILED_OUTPUT_FILE = "failed_samples.jsonl"
+MAX_NEW_TOKENS_CODING = 2048       # لضمان عدم قطع الكود البرمجي
+                 # تأخير بين الطلبات لتجنب الـ Rate Limit
 
 # 4. تحميل الإعدادات من config.yaml
 try:
