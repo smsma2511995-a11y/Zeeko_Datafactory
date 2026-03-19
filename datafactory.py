@@ -54,8 +54,8 @@ RETRY_ATTEMPTS = 3
 RETRY_DELAY = 5
 
 # ملفات الإخراج
-OUTPUT_FILE = "/data/enriched_training_data.jsonl"
-FAILED_OUTPUT_FILE = "/data/failed_samples.jsonl"
+OUTPUT_FILE = "data/enriched_training_data.jsonl"
+FAILED_OUTPUT_FILE = "data/failed_samples.jsonl"
 os.makedirs("/data", exist_ok=True)
 
 # -------------------- إعداد Gemini --------------------
@@ -789,6 +789,23 @@ def process_hf_items(items, client, model_name, output_file):
             # تأخير بين الطلبات
             time.sleep(HF_DELAY)
             pbar.update(1)
+# 1. دالة التحقق من البيانات (إعادة دمج منطق التصفية الأصلي)
+def validate_item(it):
+    """التحقق من صحة العينة بناءً على نوع المهمة لضمان وجود البيانات الأساسية."""
+    task = it.get("task")
+    if task == "mcq" or task == "reading":
+        return bool(it.get("question") and str(it.get("question")).strip())
+    elif task == "math":
+        return bool(it.get("question_en") and str(it.get("question_en")).strip())
+    elif task == "coding":
+        return bool(it.get("problem_description") and str(it.get("problem_description")).strip())
+    elif task == "general_qa":
+        return bool(it.get("instruction") and str(it.get("instruction")).strip())
+    elif task == "summary":
+        return bool(it.get("article") and str(it.get("article")).strip())
+    else:
+        # إذا كانت المهمة غير معروفة، نمررها أو نرفضها حسب رغبتك
+        return True
 
 # -------------------- الدالة الرئيسية --------------------
 def main():
