@@ -24,7 +24,7 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
         # تحقق من التثبيت
-        pip install google-genai || (echo "⚠️ google-genai not found" && exit 1)
+        pip install google-genai google-api-core || (echo "⚠️ google-genai not found" && exit 1)
 
     - name: Restore previous output files
       uses: actions/cache@v4
