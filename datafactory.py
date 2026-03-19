@@ -11,6 +11,8 @@ import subprocess
 import sys
 from tqdm import tqdm
 from datasets import load_dataset
+from google.api_core import exceptions
+
 
 # 1. إعداد اللوجر فوراً لتجنب NameError
 logging.basicConfig(
@@ -52,7 +54,8 @@ RETRY_DELAY = 5                    # وقت الانتظار بين المحاو
 OUTPUT_FILE = "enriched_training_data.jsonl"
 FAILED_OUTPUT_FILE = "failed_samples.jsonl"
 MAX_NEW_TOKENS_CODING = 2048       # لضمان عدم قطع الكود البرمجي
-                 # تأخير بين الطلبات لتجنب الـ Rate Limit
+# تأخير بين الطلبات لتجنب الـ Rate Limit
+#الموديل المضمون حالياً
 
 # 4. تحميل الإعدادات من config.yaml
 try:
