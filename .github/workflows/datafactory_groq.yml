@@ -1,4 +1,3 @@
-
 name: Data Factory with GROQ
 
 on:
@@ -11,11 +10,17 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 360
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
           python-version: '3.10'
-      - run: pip install -r requirements.txt
+
+      - name: Install Dependencies
+        run: pip install -r requirements.txt
+
       - name: Restore cache
         uses: actions/cache@v4
         with:
@@ -24,15 +29,20 @@ jobs:
             data/failed_samples.jsonl
           key: datafactory-groq-${{ github.run_id }}
           restore-keys: datafactory-groq-
+
       - name: Run data factory
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}   # اختياري، للاستخدام المباشر
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: python datafactory_groq.py
-      - name: Upload artifacts
+
+      - name: Upload output files as artifacts
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: enriched-data
+          name: enriched-data-${{ github.run_id }}
           path: |
             data/*.jsonl
             data/*.json
+          if-no-files-found: warn
+          retention-days: 7
