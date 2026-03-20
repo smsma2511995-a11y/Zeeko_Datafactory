@@ -48,11 +48,11 @@ MAX_NEW_TOKENS_DEFAULT = 2048
 GEMINI_DELAY = 5.0                 # تقليل التأخير قليلاً لتسريع العمل (2 ثانية كافية)
 RETRY_ATTEMPTS = 3                 # عدد محاولات إعادة المحاولة عند الفشل
 RETRY_DELAY = 5                    # وقت الانتظار بين المحاولات
+# التعديل المطلوب في datafactory.py
+OUTPUT_FILE = "data/enriched_training_data.jsonl"
+FAILED_OUTPUT_FILE = "data/failed_samples.jsonl"
 
-# تعريف مسارات الملفات (دي اللي كانت ناقصة ومسببة الـ Error)
-OUTPUT_FILE = "enriched_training_data.jsonl"
-FAILED_OUTPUT_FILE = "failed_samples.jsonl"
-MAX_NEW_TOKENS_CODING = 2048       # لضمان عدم قطع الكود البرمجي
+#لضمان عدم قطع الكود البرمجي
 # تأخير بين الطلبات لتجنب الـ Rate Limit
 #الموديل المضمون حالياً
 
