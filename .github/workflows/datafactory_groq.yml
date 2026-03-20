@@ -1,0 +1,38 @@
+
+name: Data Factory with GROQ
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 2 * * *'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - run: pip install -r requirements.txt
+      - name: Restore cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            data/enriched_training_data.jsonl
+            data/failed_samples.jsonl
+          key: datafactory-groq-${{ github.run_id }}
+          restore-keys: datafactory-groq-
+      - name: Run data factory
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}   # اختياري، للاستخدام المباشر
+        run: python datafactory_groq.py
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: enriched-data
+          path: |
+            data/*.jsonl
+            data/*.json
