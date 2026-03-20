@@ -45,8 +45,9 @@ teacher:
 gemini:
   api_key: ${{ secrets.GEMINI_API_KEY }}
   model: "gemini-2.0-flash-lite"
-
+  delay: 10
 data:
+  max_samples: 500
   synthetic_json: "synthetic_data.json"
                             # للاختبار (يُرفع لاحقاً)
   do_sample : False
@@ -55,3 +56,21 @@ data:
 export:
   onnx_path: "model.onnx"
   tflite_path: "model_quant.tflite"
+
+
+# إعدادات GROQ
+groq:
+  api_key: ${{ secrets.GROQ_API_KEY}}     # أو يُقرأ من متغير البيئة GROQ_API_KEY
+  model: "openai/gpt-oss-120b"     # النموذج المستخدم
+  temperature: 0.3
+  max_tokens: 512                  # القيمة الافتراضية
+  max_tokens_coding: 2048          # لمهام البرمجة
+
+# نموذج سريع وخفيف
+                         # ثوانٍ بين الطلبات
+
+# إعدادات عامة
+processing:
+  retry_attempts: 3
+  retry_delay: 5
+  hf_delay: 2                       # للاستخدامات المستقبلية (غير مستخدم هنا)
