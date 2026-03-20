@@ -678,7 +678,7 @@ def process_groq_items(items, output_file):
 
             # تأخير بين الطلبات لتجنب حدود المعدل
             time.sleep(HF_DELAY)   # يمكن تعديله
-            pbar.update(5)
+            pbar.update(10)
 
 # -------------------- معالجة مادة النحو باستخدام Gemini (الإصدار الاحترافي) --------------------
 def process_gemini_grammar_items(items, output_file, defer=True):
