@@ -3,12 +3,12 @@ name: Run Data Factory (Gemini)
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 2 * * *'
+    - cron: '0 2 * * *' # يعمل تلقائياً الساعة 2 صباحاً
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 360
+    timeout-minutes: 360 # مهلة 6 ساعات لتناسب حجم البيانات الكبير
 
     steps:
     - name: Checkout repository
@@ -22,8 +22,7 @@ jobs:
     - name: Upgrade pip and install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        # تحقق من التثبيت
+        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
         pip install google-genai google-api-core || (echo "⚠️ google-genai not found" && exit 1)
 
     - name: Restore previous output files
@@ -42,11 +41,13 @@ jobs:
       run: |
         python datafactory.py
 
-    - name: Upload artifacts
+    - name: Upload output files as artifacts
+      if: always() # يضمن رفع الملفات حتى لو فشلت خطوة معالجة البيانات
       uses: actions/upload-artifact@v4
       with:
-        name: enriched-data
+        name: enriched-data-${{ github.run_id }}
         path: |
           data/*.jsonl
           data/*.json
         if-no-files-found: warn
+        retention-days: 7 # لحفظ المساحة في مستودعك
