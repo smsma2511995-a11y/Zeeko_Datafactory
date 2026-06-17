@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 # ضع مفتاح API الخاص بـ Groq هنا أو في متغيرات البيئة
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "YOUR_GROQ_API_KEY")
-GROQ_MODEL = "llama3-70b-8192"  # أو النموذج الذي تفضله للمهام العامة
+GROQ_MODEL = "openai/gpt-oss-20b"  # أو النموذج الذي تفضله للمهام العامة
 GROQ_TEMP = 0.5
 GROQ_MAX_TOKENS = 2048
 
