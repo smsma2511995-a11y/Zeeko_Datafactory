@@ -32,7 +32,7 @@ if GROQ_API_KEY == "YOUR_GROQ_API_KEY":
     logger.warning("⚠️ لم يتم تعيين GROQ_API_KEY، استخدم متغير البيئة أو عدّل المفتاح في الكود.")
 
 # نموذج Groq – يُفضل استخدام نموذج يدعم JSON mode (مثل llama3-70b-8192)
-GROQ_MODEL = os.environ.get("GROQ_MODEL", "llama3-70b-8192")
+GROQ_MODEL = os.environ.get("GROQ_MODEL", "openai/gpt-oss-20b")
 GROQ_TEMP = float(os.environ.get("GROQ_TEMP", 0.5))
 GROQ_MAX_TOKENS = int(os.environ.get("GROQ_MAX_TOKENS", 2048))
 
