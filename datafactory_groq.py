@@ -2,8 +2,8 @@
 # -*- coding: utf-8 -*-
 
 """
-سكريبت معالجة البيانات وتحويلها إلى صيغة Micro-Engine باستخدام Groq API
-مع تحسينات للتعامل مع حدود المعدل (Rate Limits) وإعادة المحاولة الذكية.
+مصنع بيانات ذكي يعتمد على Groq API لتحويل الأسئلة العربية إلى صيغة Micro-Engine.
+يدعم تحميل البيانات من ArabicMMLU أو من ملف JSON خارجي.
 """
 
 import os
@@ -14,9 +14,10 @@ import random
 import re
 from tqdm import tqdm
 from groq import Groq
+from datasets import load_dataset  # لتحميل البيانات من HuggingFace
 
 # ==========================================
-# 1. الإعدادات العامة وتسجيل المخرجات (Logging)
+# 1. الإعدادات العامة
 # ==========================================
 logging.basicConfig(
     level=logging.INFO,
@@ -24,38 +25,88 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# ----------------------
-# قراءة المفاتيح من متغيرات البيئة أو استخدم قيماً افتراضية (للاختبار فقط)
-# ----------------------
-GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "YOUR_GROQ_API_KEY")
-if GROQ_API_KEY == "YOUR_GROQ_API_KEY":
-    logger.warning("⚠️ لم يتم تعيين GROQ_API_KEY، استخدم متغير البيئة أو عدّل المفتاح في الكود.")
+# متغيرات البيئة
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
+if not GROQ_API_KEY:
+    raise ValueError("❌ GROQ_API_KEY غير موجود. عيّنه في متغيرات البيئة.")
 
-# نموذج Groq – يُفضل استخدام نموذج يدعم JSON mode (مثل llama3-70b-8192)
 GROQ_MODEL = os.environ.get("GROQ_MODEL", "openai/gpt-oss-20b")
 GROQ_TEMP = float(os.environ.get("GROQ_TEMP", 0.5))
-GROQ_MAX_TOKENS = int(os.environ.get("GROQ_MAX_TOKENS", 2048))
+GROQ_MAX_TOKENS = int(os.environ.get("GROQ_MAX_TOKENS", 8000))
 
-# إعدادات إعادة المحاولة والتأخير
 MAX_RETRIES = int(os.environ.get("MAX_RETRIES", 5))
-BASE_DELAY = float(os.environ.get("BASE_DELAY", 2.0))      # التأخير الأساسي بين المحاولات
-REQUEST_DELAY = float(os.environ.get("REQUEST_DELAY", 3.0)) # التأخير بين الطلبات الناجحة (لتجنب الـ RPM)
-JITTER = float(os.environ.get("JITTER", 1.0))              # قيمة عشوائية تضاف للتأخير
+BASE_DELAY = float(os.environ.get("BASE_DELAY", 2.0))
+REQUEST_DELAY = float(os.environ.get("REQUEST_DELAY", 2.5))
+JITTER = float(os.environ.get("JITTER", 1.0))
 
-# أسماء الملفات (قم بتعديلها لتطابق أسماء ملفاتك الحقيقية)
-INPUT_JSON_FILE = os.environ.get("INPUT_JSON_FILE", "your_input_data.json")
-OUTPUT_DATASET_FILE = os.environ.get("OUTPUT_DATASET_FILE", "micro_engine_train_data.jsonl")
+# إعدادات البيانات
+MAX_SAMPLES = int(os.environ.get("MAX_SAMPLES", 50))          # عدد العينات المطلوبة
+INPUT_JSON_FILE = os.environ.get("INPUT_JSON_FILE", "")      # ملف إدخال اختياري
+OUTPUT_DIR = os.environ.get("OUTPUT_DIR", "data")
+OUTPUT_FILE = os.path.join(OUTPUT_DIR, "micro_engine_train_data.jsonl")
 
 # تهيئة عميل Groq
 try:
     groq_client = Groq(api_key=GROQ_API_KEY)
-    logger.info("✅ تم تهيئة عميل Groq بنجاح.")
+    logger.info("✅ تم تهيئة عميل Groq.")
 except Exception as e:
-    logger.error(f"❌ فشل تهيئة عميل Groq: {e}")
+    logger.error(f"❌ فشل تهيئة Groq: {e}")
     groq_client = None
 
 # ==========================================
-# 2. القالب الهيكلي الموحد لـ Micro-Engine
+# 2. تحميل البيانات (من ملف أو من HuggingFace)
+# ==========================================
+def load_arabic_mmlu(max_samples=50):
+    """تحميل عينات من ArabicMMLU (أسئلة متعددة الخيارات)."""
+    subjects = [
+        'Physics (High School)',
+        'Biology (High School)',
+        'Arabic Language (High School)',
+        'Arabic Language (Grammar)'
+    ]
+    data = []
+    for sub in subjects:
+        try:
+            ds = load_dataset("MBZUAI/ArabicMMLU", sub, split="test", streaming=True)
+            count = 0
+            for item in ds:
+                if count >= (max_samples // len(subjects)):
+                    break
+                question = item.get("Question")
+                options = [
+                    item.get("Option 1"),
+                    item.get("Option 2"),
+                    item.get("Option 3"),
+                    item.get("Option 4")
+                ]
+                options = [opt for opt in options if opt and str(opt).strip()]
+                answer = item.get("Answer Key")
+                if question and len(options) >= 2 and answer:
+                    data.append({
+                        "question": question,
+                        "choices": options,
+                        "answer": answer,
+                        "subject": sub
+                    })
+                    count += 1
+            logger.info(f"✅ تم تحميل {count} عينة من {sub}.")
+        except Exception as e:
+            logger.warning(f"⚠️ فشل تحميل {sub}: {e}")
+    return data
+
+def load_from_json(file_path):
+    """تحميل البيانات من ملف JSON (قائمة كائنات)."""
+    if not os.path.exists(file_path):
+        logger.error(f"❌ ملف {file_path} غير موجود.")
+        return None
+    with open(file_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    if not isinstance(data, list):
+        data = [data]  # تحويل إلى قائمة
+    return data
+
+# ==========================================
+# 3. قالب Micro-Engine
 # ==========================================
 SYSTEM_PROMPT = (
     "أنت نظام وكلاء متعدد المهام (Multi-Agent System) يعمل على نموذج Micro-Engine. "
@@ -67,27 +118,19 @@ SYSTEM_PROMPT = (
 )
 
 def format_to_micro_engine(user_query, think_content, solve_content):
-    """
-    تأطير البيانات بالرموز الدلالية الخاصة بالـ Micro-Engine لتجهيزها للتدريب.
-    """
-    formatted_text = (
+    return (
         f"<|startoftext|><|pad|><|unk|><|system|>{SYSTEM_PROMPT}<|end_context|>\n"
         f"<|startoftext|><|user|>{user_query}<|endoftext|>\n"
         f"<|assistant|><|think|>{think_content}<|end_think|>\n"
         f"<|solve|>{solve_content}<|endoftext|>"
     )
-    return formatted_text
 
 # ==========================================
-# 3. دوال مساعدة للتعامل مع الـ API وإعادة المحاولة
+# 4. استدعاء Groq مع إعادة المحاولة
 # ==========================================
 def call_groq_with_retry(prompt_instruction):
-    """
-    استدعاء Groq API مع إعادة محاولة ذكية تستخرج وقت الانتظار من رسائل الخطأ (خاصة 429).
-    """
     if not groq_client:
         raise RuntimeError("عميل Groq غير مهيأ.")
-
     for attempt in range(MAX_RETRIES):
         try:
             response = groq_client.chat.completions.create(
@@ -98,148 +141,119 @@ def call_groq_with_retry(prompt_instruction):
                 ],
                 temperature=GROQ_TEMP,
                 max_tokens=GROQ_MAX_TOKENS,
-                # ملاحظة: response_format مدعوم في بعض النماذج، لكن قد يسبب مشاكل،
-                # لذا نضعه في try-except أو نتركه معتمداً على تعليمات النموذج.
-                # نفضل إزالة response_format والاعتماد على التعليمات النصية.
-                # response_format={"type": "json_object"}  # يمكن تفعيله إذا كان النموذج يدعمه
             )
             return response.choices[0].message.content
-
         except Exception as e:
             error_msg = str(e)
-            wait_time = BASE_DELAY * (2 ** attempt)  # تأخير متزايد (Backoff)
-
-            # محاولة استخراج وقت الانتظار من رسائل 429
+            wait_time = BASE_DELAY * (2 ** attempt)
             if "429" in error_msg or "Rate limit" in error_msg:
-                # البحث عن "try again in Xs" أو "X seconds"
                 match = re.search(r'try again in ([\d.]+)s', error_msg)
                 if not match:
                     match = re.search(r'(\d+\.?\d*) seconds', error_msg)
                 if match:
-                    wait_time = float(match.group(1)) + 0.5  # نضيف نصف ثانية احتياطية
-
-            logger.warning(f"⚠️ محاولة {attempt+1} لـ Groq فشلت: {e}")
+                    wait_time = float(match.group(1)) + 0.5
+            logger.warning(f"⚠️ محاولة {attempt+1} فشلت: {e}")
             if attempt < MAX_RETRIES - 1:
-                logger.info(f"⏳ الانتظار {wait_time:.2f} ثانية قبل إعادة المحاولة...")
+                logger.info(f"⏳ الانتظار {wait_time:.2f} ثانية...")
                 time.sleep(wait_time)
             else:
-                # آخر محاولة فشلت، نرفع الاستثناء
                 raise
-
-    # لن نصل هنا
     return None
 
 # ==========================================
-# 4. المعالجة الرئيسية
+# 5. المعالجة الرئيسية
 # ==========================================
-def process_and_enrich_dataset(input_file, output_file):
-    if not groq_client:
-        logger.error("❌ لا يمكن بدء المعالجة بدون عميل API صالح.")
+def process_samples(samples, output_file):
+    """معالجة قائمة العينات وإنتاج JSONL."""
+    if not samples:
+        logger.warning("⚠️ لا توجد عينات للمعالجة.")
         return
 
-    if not os.path.exists(input_file):
-        logger.error(f"❌ لم يتم العثور على ملف المدخلات: {input_file}. تأكد من تسميته بشكل صحيح.")
-        return
+    # إنشاء مجلد المخرجات إذا لم يكن موجودًا
+    os.makedirs(os.path.dirname(output_file), exist_ok=True)
 
-    logger.info(f"🟢 قراءة البيانات من {input_file}...")
-    try:
-        with open(input_file, "r", encoding="utf-8") as f:
-            data_items = json.load(f)
-    except Exception as e:
-        logger.error(f"❌ خطأ أثناء قراءة ملف JSON: {e}")
-        return
-
-    # التأكد من أن البيانات عبارة عن قائمة
-    if not isinstance(data_items, list):
-        logger.warning("⚠️ تحذير: ملف JSON ليس قائمة (List). سيتم محاولة معالجته كعنصر مفرد.")
-        data_items = [data_items]
-
-    logger.info(f"🚀 تم العثور على {len(data_items)} عينة. بدء المعالجة والتوليد عبر Groq...")
-
-    # فتح ملف المخرجات في وضع الإضافة (Append) لتحقيق خصائص الاستئناف (Checkpointing)
+    # فتح ملف المخرجات للإلحاق (للاستئناف)
     with open(output_file, "a", encoding="utf-8") as out_f:
-        # نستخدم tqdm لعرض التقدم
-        for index, item in enumerate(tqdm(data_items, desc="Processing Items")):
-            # البحث عن النص في عدة مفاتيح محتملة
-            user_query = (
-                item.get("question") or
-                item.get("text") or
-                item.get("prompt") or
-                item.get("input") or
-                item.get("content")
-            )
-            if not user_query:
-                logger.warning(
-                    f"⚠️ العينة رقم {index} لا تحتوي على مفتاح نصي معروف. تم تخطيها. "
-                    f"المفاتيح المتاحة: {list(item.keys())}"
-                )
+        for idx, item in enumerate(tqdm(samples, desc="معالجة العينات")):
+            # بناء النص الذي سيُرسل إلى النموذج
+            if "question" in item:
+                user_query = item["question"]
+                # إضافة الخيارات إن وجدت
+                if "choices" in item:
+                    choices_text = "\n".join([f"{chr(65+i)}. {ch}" for i, ch in enumerate(item["choices"])])
+                    user_query += f"\nالخيارات:\n{choices_text}"
+                    if "answer" in item:
+                        user_query += f"\nالإجابة الصحيحة: {item['answer']}"
+            elif "text" in item:
+                user_query = item["text"]
+            else:
+                logger.warning(f"⚠️ العينة {idx} لا تحتوي على مفتاح معروف، تم تخطيها.")
                 continue
 
-            # صياغة التعليمات لإجبار النموذج على إخراج JSON
             prompt_instruction = (
-                f"قم بحل المسألة أو الإجابة على السؤال التالي ملتزماً بالأدوار الثلاثة لنظام الوكلاء:\n"
-                f"1) التفكير الجدلي والعميق والنقد الذاتي.\n"
+                f"قم بحل المسألة أو الإجابة على السؤال التالي ملتزماً بالأدوار الثلاثة:\n"
+                f"1) التفكير الجدلي والعميق.\n"
                 f"2) التخطيط للحل خطوة بخطوة.\n"
-                f"3) تقديم الحل النهائي المباشر المستقر.\n\n"
-                f"المسألة/السؤال:\n{user_query}\n\n"
-                f"⚠️ يجب أن تكون استجابتك بتنسيق JSON حصراً ودون أي نصوص إضافية خارج الأقواس، كالتالي:\n"
-                f"{{\n"
-                f"  \"thinking\": \"اكتب هنا كل مجريات التفكير الجدلي والخطوات والتخطيط العميق...\",\n"
-                f"  \"solution\": \"اكتب هنا الحل النهائي الحتمي المباشر...\"\n"
-                f"}}"
+                f"3) تقديم الحل النهائي المباشر.\n\n"
+                f"السؤال:\n{user_query}\n\n"
+                f"⚠️ استجب بتنسيق JSON حصرياً كالتالي:\n"
+                f"{{\n  \"thinking\": \"...\",\n  \"solution\": \"...\"\n}}"
             )
 
-            success = False
             try:
-                raw_content = call_groq_with_retry(prompt_instruction)
-
-                # محاولة استخراج JSON من النص (قد يحتوي على Markdown أو نصوص إضافية)
-                # نستخدم regex لاستخراج أول كائن JSON صحيح
-                json_match = re.search(r'(\{.*\})', raw_content, re.DOTALL)
+                raw = call_groq_with_retry(prompt_instruction)
+                # استخراج JSON
+                json_match = re.search(r'(\{.*\})', raw, re.DOTALL)
                 if not json_match:
-                    raise ValueError("لم يتم العثور على JSON صحيح في الاستجابة.")
+                    raise ValueError("لا يوجد JSON صحيح.")
+                json_str = re.sub(r',\s*([}\]])', r'\1', json_match.group(1))
+                res = json.loads(json_str)
 
-                json_str = json_match.group(1)
-                # تنظيف بسيط: إزالة الفواصل الزائدة قبل الأقواس
-                json_str = re.sub(r',\s*([}\]])', r'\1', json_str)
+                think = res.get("thinking", "").strip()
+                solve = res.get("solution", "").strip()
+                if not think or not solve:
+                    raise ValueError("محتوى فارغ.")
 
-                res_json = json.loads(json_str)
-
-                think_content = res_json.get("thinking", "").strip()
-                solve_content = res_json.get("solution", "").strip()
-
-                if not think_content or not solve_content:
-                    raise ValueError("محتوى التفكير أو الحل فارغ في استجابة الـ API.")
-
-                # صياغة النص بالتنسيق النهائي
-                final_sample_text = format_to_micro_engine(user_query, think_content, solve_content)
-
-                # حفظ العينة بصيغة JSONL
-                output_entry = {
-                    "text": final_sample_text,
-                    "metadata": {
-                        "original_index": index,
-                        "source_file": input_file
-                    }
+                final_text = format_to_micro_engine(user_query, think, solve)
+                record = {
+                    "text": final_text,
+                    "metadata": {"index": idx, "source": "groq_enriched"}
                 }
-                out_f.write(json.dumps(output_entry, ensure_ascii=False) + "\n")
-                out_f.flush()  # كتابة فورية
+                out_f.write(json.dumps(record, ensure_ascii=False) + "\n")
+                out_f.flush()
+                logger.info(f"✅ تمت معالجة العينة {idx+1}/{len(samples)}")
 
-                success = True
+                # تأخير
+                time.sleep(REQUEST_DELAY + random.uniform(0, JITTER))
 
             except Exception as e:
-                logger.error(f"❌ فشل معالجة العينة {index}: {e}")
-
-            # تأخير بين الطلبات الناجحة (مع جيتر) لتجنب تجاوز حدود المعدل
-            if success:
-                delay = REQUEST_DELAY + random.uniform(0, JITTER)
-                time.sleep(delay)
-
-    logger.info(f"✨ اكتملت المعالجة! تم حفظ البيانات النهائية المجهزة للتدريب في: {output_file}")
+                logger.error(f"❌ فشل العينة {idx}: {e}")
 
 # ==========================================
-# 5. نقطة الانطلاق لتشغيل السكريبت
+# 6. الدالة الرئيسية
 # ==========================================
+def main():
+    # 1. محاولة تحميل البيانات من ملف الإدخال إذا وُجد
+    if INPUT_JSON_FILE and os.path.exists(INPUT_JSON_FILE):
+        logger.info(f"📂 تحميل البيانات من {INPUT_JSON_FILE}")
+        samples = load_from_json(INPUT_JSON_FILE)
+        if samples:
+            # أخذ العدد المطلوب
+            samples = samples[:MAX_SAMPLES]
+            logger.info(f"✅ تم تحميل {len(samples)} عينة من الملف.")
+        else:
+            samples = []
+    else:
+        logger.info("📂 لم يتم العثور على ملف إدخال، سيتم تحميل عينات من ArabicMMLU.")
+        samples = load_arabic_mmlu(max_samples=MAX_SAMPLES)
+
+    if not samples:
+        logger.error("❌ لا توجد بيانات للمعالجة. تأكد من المصادر.")
+        return
+
+    logger.info(f"🚀 بدء المعالجة لـ {len(samples)} عينة...")
+    process_samples(samples, OUTPUT_FILE)
+    logger.info(f"✨ انتهت المعالجة. المخرجات في {OUTPUT_FILE}")
+
 if __name__ == "__main__":
-    # يمكن تمرير أسماء الملفات كوسائط أو استخدام القيم الافتراضية
-    process_and_enrich_dataset(INPUT_JSON_FILE, OUTPUT_DATASET_FILE)
+    main()
