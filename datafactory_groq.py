@@ -32,7 +32,7 @@ if not GROQ_API_KEY:
 
 GROQ_MODEL = os.environ.get("GROQ_MODEL", "openai/gpt-oss-20b")
 GROQ_TEMP = float(os.environ.get("GROQ_TEMP", 0.5))
-GROQ_MAX_TOKENS = int(os.environ.get("GROQ_MAX_TOKENS", 8000))
+GROQ_MAX_TOKENS = int(os.environ.get("GROQ_MAX_TOKENS", 7000))
 
 MAX_RETRIES = int(os.environ.get("MAX_RETRIES", 5))
 BASE_DELAY = float(os.environ.get("BASE_DELAY", 2.0))
