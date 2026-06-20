@@ -1,40 +1,90 @@
 name: Data Factory with GROQ
 
 on:
-  workflow_dispatch:                     # تشغيل يدوي
+  workflow_dispatch:                      # تشغيل يدوي من واجهة GitHub
   schedule:
-    - cron: '0 2 * * *'                  # تشغيل تلقائي يومياً عند الساعة 2 صباحاً
+    - cron: '0 2 * * *'                   # تشغيل تلقائي يومياً الساعة 2 صباحاً
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 360                 # 6 ساعات كحد أقصى
+    timeout-minutes: 360                  # 6 ساعات كحد أقصى (للتشغيل الطويل)
     permissions:
-      contents: write                    # صلاحية كتابة المستودع (لـ git push)
+      contents: write                     # صلاحية الكتابة على المستودع (لـ git push)
+
     steps:
+      # 1. سحب الكود من المستودع
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0                 # لسحب تاريخ المستودع بالكامل (لتجنب مشاكل الدفع)
+          fetch-depth: 0                  # سحب تاريخ المستودع بالكامل لتجنب مشاكل الدفع
 
+      # 2. إعداد بيئة Python
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
+      # 3. تثبيت المكتبات المطلوبة
       - name: Install dependencies
         run: |
-          pip install --upgrade pip
-          pip install groq datasets tqdm   # تأكد من وجودها في requirements.txt أيضاً
-          # يمكنك استبدال السطر أعلاه بـ: pip install -r requirements.txt
-          # إذا كان لديك ملف requirements.txt يحتوي على هذه المكتبات
+          python -m pip install --upgrade pip
+          pip install groq datasets tqdm
+          # في حال وجود ملف requirements.txt يمكن استخدام:
+          # pip install -r requirements.txt
 
-      # استعادة البيانات السابقة من ذاكرة التخزين المؤقت (اختياري، قد يساعد في الاستئناف)
+      # 4. استعادة الذاكرة المؤقتة (اختياري، لتسريع التشغيل في المرات القادمة)
       - name: Restore cache
         uses: actions/cache@v4
         with:
           path: |
             data/enriched_training_data.jsonl
+            data/failed_samples.jsonl
+          key: datafactory-groq-${{ github.run_id }}
+          restore-keys: datafactory-groq-
+
+      # 5. تشغيل السكريبت الرئيسي لتوليد البيانات
+      - name: Run data factory
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}   # اختياري إذا كنت تستخدمه في الكود
+          GROQ_MODEL: "openai/gpt-oss-20b"                # نموذج Groq صحيح ومتاح
+          MAX_SAMPLES: 10                                 # عدد العينات (يمكن زيادته لاحقاً)
+          REQUEST_DELAY: 3                                # تأخير بين الطلبات لتجنب تجاوز الحد
+          OUTPUT_DIR: "data"                              # مجلد حفظ المخرجات
+        run: python datafactory_groq.py
+
+      # 6. (اختياري) عرض محتوى الملفات الناتجة للمساعدة في التصحيح
+      - name: Debug output (show generated files)
+        run: |
+          echo "=== ملفات JSONL في مجلد data ==="
+          ls -la data/*.jsonl 2>/dev/null || echo "لا توجد ملفات .jsonl"
+          echo "=== أول 10 أسطر من micro_engine_train_data.jsonl ==="
+          head -n 10 data/micro_engine_train_data.jsonl 2>/dev/null || echo "الملف غير موجود"
+
+      # 7. دفع الملفات الجديدة أو المعدلة إلى المستودع (المطلوب منك)
+      - name: Commit and push generated data
+        run: |
+          git config --global user.name "${{ github.actor }}"
+          git config --global user.email "${{ github.actor }}@users.noreply.github.com"
+          # إضافة كل التغييرات في مجلد data (جميع الملفات بغض النظر عن الامتداد)
+          git add data/
+          # git add -A   # (يمكنك تفعيل هذا السطر بدلاً من السابق لإضافة كل التغييرات في كل المجلدات)
+          git status    # عرض حالة الملفات المضافة
+          git commit -m "تحديث بيانات التدريب [skip ci]" || echo "لا توجد تغييرات جديدة"
+          git push
+
+      # 8. رفع الملفات كـ Artifact للتحميل اليدوي (احتياطي)
+      - name: Upload output files as artifacts
+        if: always()                        # يتم الرفع حتى لو فشلت بعض الخطوات السابقة
+        uses: actions/upload-artifact@v4
+        with:
+          name: enriched-data-${{ github.run_id }}
+          path: |
+            data/*.jsonl
+            data/*.json
+          if-no-files-found: warn           # يحذر إذا لم يجد ملفات
+          retention-days: 20                 # يحتفظ بالملف 7 أيام            data/enriched_training_data.jsonl
             data/failed_samples.jsonl
           key: datafactory-groq-${{ github.run_id }}
           restore-keys: datafactory-groq-
