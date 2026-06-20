@@ -1,26 +1,35 @@
 name: Data Factory with GROQ
 
 on:
-  workflow_dispatch:
+  workflow_dispatch:                     # تشغيل يدوي
   schedule:
-    - cron: '0 2 * * *'
+    - cron: '0 2 * * *'                  # تشغيل تلقائي يومياً عند الساعة 2 صباحاً
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 360
+    timeout-minutes: 360                 # 6 ساعات كحد أقصى
+    permissions:
+      contents: write                    # صلاحية كتابة المستودع (لـ git push)
     steps:
-      - name: Checkout
+      - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0                 # لسحب تاريخ المستودع بالكامل (لتجنب مشاكل الدفع)
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
-      - name: Install Dependencies
-        run: pip install -r requirements.txt
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install groq datasets tqdm   # تأكد من وجودها في requirements.txt أيضاً
+          # يمكنك استبدال السطر أعلاه بـ: pip install -r requirements.txt
+          # إذا كان لديك ملف requirements.txt يحتوي على هذه المكتبات
 
+      # استعادة البيانات السابقة من ذاكرة التخزين المؤقت (اختياري، قد يساعد في الاستئناف)
       - name: Restore cache
         uses: actions/cache@v4
         with:
@@ -33,16 +42,38 @@ jobs:
       - name: Run data factory
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}   # إذا كنت تستخدمه في الكود
+          GROQ_MODEL: "mixtral-8x7b-32768"                # نموذج صحيح ومتاح في Groq
+          MAX_SAMPLES: 10                                 # عدد صغير للاختبار، يمكنك زيادته
+          REQUEST_DELAY: 3                                # تأخير بين الطلبات لتجنب حد المعدل
+          OUTPUT_DIR: "data"                              # مجلد المخرجات
         run: python datafactory_groq.py
 
+      # عرض محتوى الملفات الناتجة للمساعدة في التصحيح (اختياري)
+      - name: Debug output
+        run: |
+          echo "=== محتوى data/*.jsonl ==="
+          cat data/*.jsonl || echo "لا توجد ملفات jsonl"
+          echo "=== محتوى data/*.json ==="
+          cat data/*.json || echo "لا توجد ملفات json"
+
+      # دفع الملفات إلى المستودع (الفرع الحالي)
+      - name: Commit and push generated data
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/*.jsonl data/*.json 2>/dev/null || echo "لا توجد ملفات للإضافة"
+          git commit -m "تحديث بيانات التدريب [skip ci]" || echo "لا توجد تغييرات"
+          git push
+
+      # رفع الملفات كـ Artifact (لتحميلها يدوياً من صفحة التشغيل)
       - name: Upload output files as artifacts
-        if: always()
+        if: always()                      # يتم الرفع حتى لو فشلت بعض الخطوات السابقة
         uses: actions/upload-artifact@v4
         with:
           name: enriched-data-${{ github.run_id }}
           path: |
             data/*.jsonl
             data/*.json
-          if-no-files-found: warn
-          retention-days: 7
+          if-no-files-found: warn        # يحذر إذا لم يجد ملفات
+          retention-days: 7              # الاحتفاظ بها لمدة 7 أيام
