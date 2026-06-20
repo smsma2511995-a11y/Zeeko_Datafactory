@@ -43,7 +43,7 @@ jobs:
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}   # إذا كنت تستخدمه في الكود
-          GROQ_MODEL: "mixtral-8x7b-32768"                # نموذج صحيح ومتاح في Groq
+          GROQ_MODEL: "openai/gpt-oss-20b"                # نموذج صحيح ومتاح في Groq
           MAX_SAMPLES: 10                                 # عدد صغير للاختبار، يمكنك زيادته
           REQUEST_DELAY: 3                                # تأخير بين الطلبات لتجنب حد المعدل
           OUTPUT_DIR: "data"                              # مجلد المخرجات
