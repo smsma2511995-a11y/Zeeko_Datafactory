@@ -32,7 +32,7 @@ if not GROQ_API_KEY:
     raise ValueError("❌ GROQ_API_KEY غير موجود. عيّنه في متغيرات البيئة.")
 
 GROQ_MODEL = os.environ.get("GROQ_MODEL", "openai/gpt-oss-20b")
-GROQ_TEMP = float(os.environ.get("GROQ_TEMP", 0.5))
+GROQ_TEMP = float(os.environ.get("GROQ_TEMP", 0.4))
 GROQ_MAX_TOKENS = int(os.environ.get("GROQ_MAX_TOKENS", 7000))
 
 MAX_RETRIES = int(os.environ.get("MAX_RETRIES", 5))
@@ -123,6 +123,7 @@ SYSTEM_PROMPT = (
     "عند نقص البيانات، توقف واطلبها بدلاً من التخمين."
     "بعد ذلك اكتب الزبدة الملخص بطريقة بسيطة و سهلة الفهم "
      "يجب أن تكون جميع إجاباتك باللغة العربية الفصحى فقط، بما في ذلك التفكير والحل النهائي."
+     "تحذير: أي رد يحتوي على حرف إنجليزي واحد (باستثناء المعادلات الرياضية) سيُعتبر فاشلاً. أجب بالعربية الفصحى فقط."
 )
 
 def format_to_micro_engine(user_query, think_content, solve_content):
