@@ -3,7 +3,7 @@
 
 """
 مصنع بيانات ذكي يعتمد على Groq API لتحويل الأسئلة العربية إلى صيغة Micro-Engine.
-يدعم تحميل البيانات من ArabicMMLU أو من ملف JSON خارجي.
+يدعم تحميل البيانات من ArabicMMLU مع إمكانية خلط العينات عشوائياً.
 """
 
 import os
@@ -12,6 +12,7 @@ import time
 import logging
 import random
 import re
+import sys
 from tqdm import tqdm
 from groq import Groq
 from datasets import load_dataset  # لتحميل البيانات من HuggingFace
@@ -36,14 +37,16 @@ GROQ_MAX_TOKENS = int(os.environ.get("GROQ_MAX_TOKENS", 7000))
 
 MAX_RETRIES = int(os.environ.get("MAX_RETRIES", 5))
 BASE_DELAY = float(os.environ.get("BASE_DELAY", 2.0))
-REQUEST_DELAY = float(os.environ.get("REQUEST_DELAY", 2.5))
+REQUEST_DELAY = float(os.environ.get("REQUEST_DELAY", 3.0))
 JITTER = float(os.environ.get("JITTER", 1.0))
 
 # إعدادات البيانات
 MAX_SAMPLES = int(os.environ.get("MAX_SAMPLES", 50))          # عدد العينات المطلوبة
-INPUT_JSON_FILE = os.environ.get("INPUT_JSON_FILE", "")      # ملف إدخال اختياري
 OUTPUT_DIR = os.environ.get("OUTPUT_DIR", "data")
 OUTPUT_FILE = os.path.join(OUTPUT_DIR, "micro_engine_train_data.jsonl")
+
+# البذرة العشوائية لضمان تنوع العينات في كل تشغيل
+RANDOM_SEED = int(os.environ.get("RANDOM_SEED", random.randint(1, 1000000)))
 
 # تهيئة عميل Groq
 try:
@@ -52,25 +55,37 @@ try:
 except Exception as e:
     logger.error(f"❌ فشل تهيئة Groq: {e}")
     groq_client = None
+    sys.exit(1)
 
 # ==========================================
-# 2. تحميل البيانات (من ملف أو من HuggingFace)
+# 2. تحميل البيانات من ArabicMMLU (عشوائية)
 # ==========================================
-def load_arabic_mmlu(max_samples=50):
-    """تحميل عينات من ArabicMMLU (أسئلة متعددة الخيارات)."""
+def load_arabic_mmlu(max_samples=50, seed=None):
+    """تحميل عينات عشوائية من ArabicMMLU (تختلف كل مرة)."""
+    if seed is None:
+        seed = random.randint(1, 1000000)
+    
     subjects = [
         'Physics (High School)',
         'Biology (High School)',
         'Arabic Language (High School)',
         'Arabic Language (Grammar)'
     ]
+    
     data = []
+    per_subject = max(1, max_samples // len(subjects))
+    
     for sub in subjects:
         try:
-            ds = load_dataset("MBZUAI/ArabicMMLU", sub, split="test", streaming=True)
+            # حمّل مجموعة الاختبار كاملة
+            ds = load_dataset("MBZUAI/ArabicMMLU", sub, split="test")
+            
+            # خلط الأسئلة باستخدام البذرة العشوائية (Seed)
+            shuffled_ds = ds.shuffle(seed=seed)
+            
             count = 0
-            for item in ds:
-                if count >= (max_samples // len(subjects)):
+            for item in shuffled_ds:
+                if count >= per_subject:
                     break
                 question = item.get("Question")
                 options = [
@@ -81,6 +96,7 @@ def load_arabic_mmlu(max_samples=50):
                 ]
                 options = [opt for opt in options if opt and str(opt).strip()]
                 answer = item.get("Answer Key")
+                
                 if question and len(options) >= 2 and answer:
                     data.append({
                         "question": question,
@@ -89,20 +105,10 @@ def load_arabic_mmlu(max_samples=50):
                         "subject": sub
                     })
                     count += 1
-            logger.info(f"✅ تم تحميل {count} عينة من {sub}.")
+            logger.info(f"✅ تم تحميل {count} عينة عشوائية من {sub} (الـ Seed: {seed}).")
         except Exception as e:
             logger.warning(f"⚠️ فشل تحميل {sub}: {e}")
-    return data
-
-def load_from_json(file_path):
-    """تحميل البيانات من ملف JSON (قائمة كائنات)."""
-    if not os.path.exists(file_path):
-        logger.error(f"❌ ملف {file_path} غير موجود.")
-        return None
-    with open(file_path, "r", encoding="utf-8") as f:
-        data = json.load(f)
-    if not isinstance(data, list):
-        data = [data]  # تحويل إلى قائمة
+    
     return data
 
 # ==========================================
@@ -160,17 +166,35 @@ def call_groq_with_retry(prompt_instruction):
                 raise
     return None
 
+def extract_json(text):
+    """استخراج JSON من النص باستخدام التوازن بين الأقواس."""
+    start = text.find('{')
+    if start == -1:
+        return None
+    brace_count = 0
+    for i in range(start, len(text)):
+        if text[i] == '{':
+            brace_count += 1
+        elif text[i] == '}':
+            brace_count -= 1
+            if brace_count == 0:
+                return text[start:i+1]
+    return None
+
 # ==========================================
 # 5. المعالجة الرئيسية
 # ==========================================
 def process_samples(samples, output_file):
-    """معالجة قائمة العينات وإنتاج JSONL."""
+    """معالجة قائمة العينات وإنتاج JSONL، مع إحصائيات عن النجاح والفشل."""
     if not samples:
         logger.warning("⚠️ لا توجد عينات للمعالجة.")
-        return
+        return 0, 0
 
     # إنشاء مجلد المخرجات إذا لم يكن موجودًا
     os.makedirs(os.path.dirname(output_file), exist_ok=True)
+
+    successful = 0
+    failed = 0
 
     # فتح ملف المخرجات للإلحاق (للاستئناف)
     with open(output_file, "a", encoding="utf-8") as out_f:
@@ -188,6 +212,7 @@ def process_samples(samples, output_file):
                 user_query = item["text"]
             else:
                 logger.warning(f"⚠️ العينة {idx} لا تحتوي على مفتاح معروف، تم تخطيها.")
+                failed += 1
                 continue
 
             prompt_instruction = (
@@ -203,10 +228,11 @@ def process_samples(samples, output_file):
             try:
                 raw = call_groq_with_retry(prompt_instruction)
                 # استخراج JSON
-                json_match = re.search(r'(\{.*\})', raw, re.DOTALL)
-                if not json_match:
+                json_str = extract_json(raw)
+                if not json_str:
                     raise ValueError("لا يوجد JSON صحيح.")
-                json_str = re.sub(r',\s*([}\]])', r'\1', json_match.group(1))
+                # تنظيف الفواصل الزائدة
+                json_str = re.sub(r',\s*([}\]])', r'\1', json_str)
                 res = json.loads(json_str)
 
                 think = res.get("thinking", "").strip()
@@ -221,6 +247,7 @@ def process_samples(samples, output_file):
                 }
                 out_f.write(json.dumps(record, ensure_ascii=False) + "\n")
                 out_f.flush()
+                successful += 1
                 logger.info(f"✅ تمت معالجة العينة {idx+1}/{len(samples)}")
 
                 # تأخير
@@ -228,32 +255,48 @@ def process_samples(samples, output_file):
 
             except Exception as e:
                 logger.error(f"❌ فشل العينة {idx}: {e}")
+                failed += 1
+
+    return successful, failed
 
 # ==========================================
-# 6. الدالة الرئيسية
+# 6. عرض الخلاصة النهائية
+# ==========================================
+def print_summary(successful, failed, output_file):
+    """طباعة خلاصة بسيطة عن عملية المعالجة."""
+    file_size = 0
+    if os.path.exists(output_file):
+        file_size = os.path.getsize(output_file)
+    
+    print("\n" + "="*50)
+    print("           🎯  ملخص تشغيل مصنع البيانات")
+    print("="*50)
+    print(f"✅ العينات الناجحة:   {successful}")
+    print(f"❌ العينات الفاشلة:   {failed}")
+    print(f"📂 إجمالي العينات:    {successful + failed}")
+    print(f"📄 حجم الملف الناتج:  {file_size:,} بايت")
+    print(f"📁 مسار الملف:        {output_file}")
+    print("="*50)
+    print("✨ انتهت المعالجة بنجاح." if failed == 0 else "⚠️ انتهت المعالجة مع بعض الأخطاء.")
+    print("="*50 + "\n")
+
+# ==========================================
+# 7. الدالة الرئيسية
 # ==========================================
 def main():
-    # 1. محاولة تحميل البيانات من ملف الإدخال إذا وُجد
-    if INPUT_JSON_FILE and os.path.exists(INPUT_JSON_FILE):
-        logger.info(f"📂 تحميل البيانات من {INPUT_JSON_FILE}")
-        samples = load_from_json(INPUT_JSON_FILE)
-        if samples:
-            # أخذ العدد المطلوب
-            samples = samples[:MAX_SAMPLES]
-            logger.info(f"✅ تم تحميل {len(samples)} عينة من الملف.")
-        else:
-            samples = []
-    else:
-        logger.info("📂 لم يتم العثور على ملف إدخال، سيتم تحميل عينات من ArabicMMLU.")
-        samples = load_arabic_mmlu(max_samples=MAX_SAMPLES)
+    # 1. تحميل البيانات من ArabicMMLU مع خلط عشوائي
+    logger.info(f"📂 تحميل عينات من ArabicMMLU (الـ Seed: {RANDOM_SEED})")
+    samples = load_arabic_mmlu(max_samples=MAX_SAMPLES, seed=RANDOM_SEED)
 
     if not samples:
         logger.error("❌ لا توجد بيانات للمعالجة. تأكد من المصادر.")
-        return
+        sys.exit(1)
 
     logger.info(f"🚀 بدء المعالجة لـ {len(samples)} عينة...")
-    process_samples(samples, OUTPUT_FILE)
-    logger.info(f"✨ انتهت المعالجة. المخرجات في {OUTPUT_FILE}")
+    successful, failed = process_samples(samples, OUTPUT_FILE)
+    
+    # عرض الخلاصة
+    print_summary(successful, failed, OUTPUT_FILE)
 
 if __name__ == "__main__":
     main()
