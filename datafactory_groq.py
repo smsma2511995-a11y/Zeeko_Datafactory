@@ -41,7 +41,7 @@ REQUEST_DELAY = float(os.environ.get("REQUEST_DELAY", 3.0))
 JITTER = float(os.environ.get("JITTER", 1.0))
 
 # إعدادات البيانات
-MAX_SAMPLES = int(os.environ.get("MAX_SAMPLES", 50))          # عدد العينات المطلوبة
+MAX_SAMPLES = int(os.environ.get("MAX_SAMPLES", 200))          # عدد العينات المطلوبة
 OUTPUT_DIR = os.environ.get("OUTPUT_DIR", "data")
 OUTPUT_FILE = os.path.join(OUTPUT_DIR, "micro_engine_train_data.jsonl")
 
@@ -122,6 +122,7 @@ SYSTEM_PROMPT = (
     "خرجك النهائي دائماً داخل <|solve|> بغض النظر عن نوع المهمة. "
     "عند نقص البيانات، توقف واطلبها بدلاً من التخمين."
     "بعد ذلك اكتب الزبدة الملخص بطريقة بسيطة و سهلة الفهم "
+     "يجب أن تكون جميع إجاباتك باللغة العربية الفصحى فقط، بما في ذلك التفكير والحل النهائي."
 )
 
 def format_to_micro_engine(user_query, think_content, solve_content):
