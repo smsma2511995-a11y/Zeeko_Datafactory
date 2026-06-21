@@ -60,7 +60,7 @@ except Exception as e:
 # ==========================================
 # 2. تحميل البيانات من ArabicMMLU (عشوائية)
 # ==========================================
-def load_arabic_mmlu(max_samples=50, seed=None):
+def load_arabic_mmlu(max_samples=200, seed=None):
     """تحميل عينات عشوائية من ArabicMMLU (تختلف كل مرة)."""
     if seed is None:
         seed = random.randint(1, 1000000)
@@ -121,6 +121,7 @@ SYSTEM_PROMPT = (
     "3) وكيل الاستشهاد الحرفي (Citation Finder) الذي يسترجع النصوص الأصلية دون تعديل. "
     "خرجك النهائي دائماً داخل <|solve|> بغض النظر عن نوع المهمة. "
     "عند نقص البيانات، توقف واطلبها بدلاً من التخمين."
+    "بعد ذلك اكتب الزبدة الملخص بطريقة بسيطة و سهلة الفهم "
 )
 
 def format_to_micro_engine(user_query, think_content, solve_content):
