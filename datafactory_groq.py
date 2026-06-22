@@ -130,7 +130,7 @@ SYSTEM_PROMPT = (
 - خرجك النهائي داخل <|the_respond|>.
 
 ابدأ الآن."""
-
+)
 
 def format_to_micro_engine(user_query, think_content, solve_content):
     return (
