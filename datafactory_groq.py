@@ -4,6 +4,7 @@
 """
 مصنع بيانات ذكي يعتمد على Groq API لتحويل الأسئلة العربية إلى صيغة Micro-Engine.
 يدعم تحميل البيانات من ArabicMMLU مع إمكانية خلط العينات عشوائياً.
+تم تصحيح أخطاء JSON وحذف الإجابات الصحيحة من الطلب.
 """
 
 import os
@@ -15,7 +16,7 @@ import re
 import sys
 from tqdm import tqdm
 from groq import Groq
-from datasets import load_dataset  # لتحميل البيانات من HuggingFace
+from datasets import load_dataset
 
 # ==========================================
 # 1. الإعدادات العامة
@@ -31,7 +32,7 @@ GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 if not GROQ_API_KEY:
     raise ValueError("❌ GROQ_API_KEY غير موجود. عيّنه في متغيرات البيئة.")
 
-GROQ_MODEL = os.environ.get("GROQ_MODEL", "openai/gpt-oss-20b")
+GROQ_MODEL = os.environ.get("GROQ_MODEL", "qwen/qwen3-32b")  # نموذج أكثر استقراراً في JSON
 GROQ_TEMP = float(os.environ.get("GROQ_TEMP", 0.4))
 GROQ_MAX_TOKENS = int(os.environ.get("GROQ_MAX_TOKENS", 7000))
 
@@ -40,12 +41,11 @@ BASE_DELAY = float(os.environ.get("BASE_DELAY", 2.0))
 REQUEST_DELAY = float(os.environ.get("REQUEST_DELAY", 3.0))
 JITTER = float(os.environ.get("JITTER", 1.0))
 
-# إعدادات البيانات
-MAX_SAMPLES = int(os.environ.get("MAX_SAMPLES", 200))          # عدد العينات المطلوبة
+MAX_SAMPLES = int(os.environ.get("MAX_SAMPLES", 200))
 OUTPUT_DIR = os.environ.get("OUTPUT_DIR", "data")
 OUTPUT_FILE = os.path.join(OUTPUT_DIR, "micro_engine_train_data.jsonl")
 
-# البذرة العشوائية لضمان تنوع العينات في كل تشغيل
+# البذرة العشوائية لتنويع العينات
 RANDOM_SEED = int(os.environ.get("RANDOM_SEED", random.randint(1, 1000000)))
 
 # تهيئة عميل Groq
@@ -77,12 +77,8 @@ def load_arabic_mmlu(max_samples=200, seed=None):
     
     for sub in subjects:
         try:
-            # حمّل مجموعة الاختبار كاملة
             ds = load_dataset("MBZUAI/ArabicMMLU", sub, split="test")
-            
-            # خلط الأسئلة باستخدام البذرة العشوائية (Seed)
             shuffled_ds = ds.shuffle(seed=seed)
-            
             count = 0
             for item in shuffled_ds:
                 if count >= per_subject:
@@ -179,34 +175,83 @@ def call_groq_with_retry(prompt_instruction):
                 raise
     return None
 
-def extract_json(text):
-    """استخراج JSON من النص باستخدام التوازن بين الأقواس."""
-    start = text.find('{')
+# ==========================================
+# 5. دالة تنقية JSON من الأخطاء (حل Invalid \escape)
+# ==========================================
+def extract_and_clean_json(raw_text):
+    """
+    تبحث عن أول JSON صحيح في النص الخام، وتنظف الشرطات المائلة العكسية غير الصالحة
+    قبل محاولة تحليلها، خاصةً لحل مشكلة Invalid \escape في النصوص العربية.
+    """
+    start = raw_text.find('{')
     if start == -1:
         return None
+
     brace_count = 0
-    for i in range(start, len(text)):
-        if text[i] == '{':
-            brace_count += 1
-        elif text[i] == '}':
-            brace_count -= 1
-            if brace_count == 0:
-                return text[start:i+1]
-    return None
+    in_string = False
+    end = -1
+    
+    for i in range(start, len(raw_text)):
+        char = raw_text[i]
+        if char == '"' and (i == 0 or raw_text[i-1] != '\\'):
+            in_string = not in_string
+        
+        if not in_string:
+            if char == '{':
+                brace_count += 1
+            elif char == '}':
+                brace_count -= 1
+                if brace_count == 0:
+                    end = i + 1
+                    break
+
+    if end == -1:
+        return None
+
+    json_str = raw_text[start:end]
+
+    # تنظيف الشرطات المائلة غير الصالحة
+    def replace_invalid_escape(match):
+        char = match.group(1)
+        if char in ['"', '\\', '/', 'b', 'f', 'n', 'r', 't']:
+            return '\\' + char
+        elif char == 'u':
+            next_chars = json_str[match.end():match.end()+4]
+            if re.match(r'^[0-9a-fA-F]{4}$', next_chars):
+                return '\\u'
+            else:
+                return '\\\\u'
+        else:
+            return '\\\\' + char
+
+    cleaned_json_str = re.sub(r'\\(.)', replace_invalid_escape, json_str)
+
+    try:
+        return json.loads(cleaned_json_str, strict=False)
+    except json.JSONDecodeError:
+        # محاولة أخيرة: استبدال كل \ بـ \\ (حل نووي)
+        try:
+            fallback_str = json_str.replace('\\', '\\\\')
+            fallback_str = fallback_str.replace('\\\\"', '\\"')
+            return json.loads(fallback_str, strict=False)
+        except:
+            return None
 
 # ==========================================
-# 5. المعالجة الرئيسية
+# 6. المعالجة الرئيسية
 # ==========================================
 def process_samples(samples, output_file):
     if not samples:
         logger.warning("⚠️ لا توجد عينات للمعالجة.")
-        return
+        return 0, 0
 
     os.makedirs(os.path.dirname(output_file), exist_ok=True)
+    successful = 0
+    failed = 0
 
     with open(output_file, "a", encoding="utf-8") as out_f:
         for idx, item in enumerate(tqdm(samples, desc="معالجة العينات")):
-            # بناء النص الذي سيُرسل إلى النموذج (بدون الإجابة الصحيحة)
+            # بناء النص (بدون الإجابة الصحيحة)
             if "question" in item:
                 user_query = item["question"]
                 if "choices" in item:
@@ -217,6 +262,7 @@ def process_samples(samples, output_file):
                 user_query = item["text"]
             else:
                 logger.warning(f"⚠️ العينة {idx} لا تحتوي على مفتاح معروف، تم تخطيها.")
+                failed += 1
                 continue
 
             prompt_instruction = (
@@ -231,11 +277,9 @@ def process_samples(samples, output_file):
 
             try:
                 raw = call_groq_with_retry(prompt_instruction)
-                json_match = re.search(r'(\{.*\})', raw, re.DOTALL)
-                if not json_match:
-                    raise ValueError("لا يوجد JSON صحيح.")
-                json_str = re.sub(r',\s*([}\]])', r'\1', json_match.group(1))
-                res = json.loads(json_str)
+                res = extract_and_clean_json(raw)
+                if res is None:
+                    raise ValueError("لا يوجد JSON صحيح بعد التنقية.")
 
                 think = res.get("thinking", "").strip()
                 solve = res.get("solution", "").strip()
@@ -248,23 +292,25 @@ def process_samples(samples, output_file):
                     "metadata": {
                         "index": idx,
                         "source": "groq_enriched",
-                        "correct_answer": item.get("answer", None),   # الإجابة الصحيحة
-                        "model_answer": solve                         # إجابة النموذج
+                        "correct_answer": item.get("answer", None),
+                        "model_answer": solve
                     }
                 }
                 out_f.write(json.dumps(record, ensure_ascii=False) + "\n")
                 out_f.flush()
+                successful += 1
                 logger.info(f"✅ تمت معالجة العينة {idx+1}/{len(samples)}")
 
                 time.sleep(REQUEST_DELAY + random.uniform(0, JITTER))
 
             except Exception as e:
+                failed += 1
                 logger.error(f"❌ فشل العينة {idx}: {e}")
 
     return successful, failed
 
 # ==========================================
-# 6. عرض الخلاصة النهائية
+# 7. عرض الخلاصة النهائية
 # ==========================================
 def print_summary(successful, failed, output_file):
     """طباعة خلاصة بسيطة عن عملية المعالجة."""
@@ -285,10 +331,9 @@ def print_summary(successful, failed, output_file):
     print("="*50 + "\n")
 
 # ==========================================
-# 7. الدالة الرئيسية
+# 8. الدالة الرئيسية
 # ==========================================
 def main():
-    # 1. تحميل البيانات من ArabicMMLU مع خلط عشوائي
     logger.info(f"📂 تحميل عينات من ArabicMMLU (الـ Seed: {RANDOM_SEED})")
     samples = load_arabic_mmlu(max_samples=MAX_SAMPLES, seed=RANDOM_SEED)
 
@@ -299,7 +344,6 @@ def main():
     logger.info(f"🚀 بدء المعالجة لـ {len(samples)} عينة...")
     successful, failed = process_samples(samples, OUTPUT_FILE)
     
-    # عرض الخلاصة
     print_summary(successful, failed, OUTPUT_FILE)
 
 if __name__ == "__main__":
