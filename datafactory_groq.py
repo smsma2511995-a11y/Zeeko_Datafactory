@@ -198,34 +198,25 @@ def extract_json(text):
 # 5. المعالجة الرئيسية
 # ==========================================
 def process_samples(samples, output_file):
-    """معالجة قائمة العينات وإنتاج JSONL، مع إحصائيات عن النجاح والفشل."""
     if not samples:
         logger.warning("⚠️ لا توجد عينات للمعالجة.")
-        return 0, 0
+        return
 
-    # إنشاء مجلد المخرجات إذا لم يكن موجودًا
     os.makedirs(os.path.dirname(output_file), exist_ok=True)
 
-    successful = 0
-    failed = 0
-
-    # فتح ملف المخرجات للإلحاق (للاستئناف)
     with open(output_file, "a", encoding="utf-8") as out_f:
         for idx, item in enumerate(tqdm(samples, desc="معالجة العينات")):
-            # بناء النص الذي سيُرسل إلى النموذج
+            # بناء النص الذي سيُرسل إلى النموذج (بدون الإجابة الصحيحة)
             if "question" in item:
                 user_query = item["question"]
-                # إضافة الخيارات إن وجدت
                 if "choices" in item:
                     choices_text = "\n".join([f"{chr(65+i)}. {ch}" for i, ch in enumerate(item["choices"])])
                     user_query += f"\nالخيارات:\n{choices_text}"
-                    if "answer" in item:
-                        user_query += f"\nالإجابة الصحيحة: {item['answer']}"
+                    # لا نضيف الإجابة الصحيحة هنا
             elif "text" in item:
                 user_query = item["text"]
             else:
                 logger.warning(f"⚠️ العينة {idx} لا تحتوي على مفتاح معروف، تم تخطيها.")
-                failed += 1
                 continue
 
             prompt_instruction = (
@@ -240,12 +231,10 @@ def process_samples(samples, output_file):
 
             try:
                 raw = call_groq_with_retry(prompt_instruction)
-                # استخراج JSON
-                json_str = extract_json(raw)
-                if not json_str:
+                json_match = re.search(r'(\{.*\})', raw, re.DOTALL)
+                if not json_match:
                     raise ValueError("لا يوجد JSON صحيح.")
-                # تنظيف الفواصل الزائدة
-                json_str = re.sub(r',\s*([}\]])', r'\1', json_str)
+                json_str = re.sub(r',\s*([}\]])', r'\1', json_match.group(1))
                 res = json.loads(json_str)
 
                 think = res.get("thinking", "").strip()
@@ -256,19 +245,21 @@ def process_samples(samples, output_file):
                 final_text = format_to_micro_engine(user_query, think, solve)
                 record = {
                     "text": final_text,
-                    "metadata": {"index": idx, "source": "groq_enriched"}
+                    "metadata": {
+                        "index": idx,
+                        "source": "groq_enriched",
+                        "correct_answer": item.get("answer", None),   # الإجابة الصحيحة
+                        "model_answer": solve                         # إجابة النموذج
+                    }
                 }
                 out_f.write(json.dumps(record, ensure_ascii=False) + "\n")
                 out_f.flush()
-                successful += 1
                 logger.info(f"✅ تمت معالجة العينة {idx+1}/{len(samples)}")
 
-                # تأخير
                 time.sleep(REQUEST_DELAY + random.uniform(0, JITTER))
 
             except Exception as e:
                 logger.error(f"❌ فشل العينة {idx}: {e}")
-                failed += 1
 
     return successful, failed
 
