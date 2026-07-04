@@ -34,7 +34,7 @@ if not GROQ_API_KEY:
 
 GROQ_MODEL = os.environ.get("GROQ_MODEL", "qwen/qwen3-32b")  # نموذج أكثر استقراراً في JSON
 GROQ_TEMP = float(os.environ.get("GROQ_TEMP", 0.4))
-GROQ_MAX_TOKENS = int(os.environ.get("GROQ_MAX_TOKENS", 7000))
+GROQ_MAX_TOKENS = int(os.environ.get("GROQ_MAX_TOKENS", 7990))
 
 MAX_RETRIES = int(os.environ.get("MAX_RETRIES", 5))
 BASE_DELAY = float(os.environ.get("BASE_DELAY", 2.0))
@@ -165,7 +165,8 @@ SYSTEM_PROMPT = ("""أنت وكيل متعدد الأدوار يجمع بين:
 
 ---
 
-ابدأ الآن بتنفيذ هذه التعليمات في ردك القادم، والتزم بها ١٠٠٪. """
+ابدأ الآن بتنفيذ هذه التعليمات في ردك القادم، والتزم به ١٠٠٪. مثل كانك تفكر قبل أن ترد ثم اكتب ردا بعد التفكير كنماذج DeepSeek-R1 
+"""
 )
 
 def format_to_micro_engine(user_query, think_content, solve_content):
