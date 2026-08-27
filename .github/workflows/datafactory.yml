@@ -2,8 +2,8 @@ name: Run Data Factory (Gemini)
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '0 2 * * *' # يعمل تلقائياً الساعة 2 صباحاً
+  
+     
 
 jobs:
   build:
